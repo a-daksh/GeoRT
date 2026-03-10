@@ -7,32 +7,37 @@
 import os
 from pathlib import Path
 
-# GeoRT Package Path Helper.
-# No more pain configuring paths!
+_DEXTERLAB_GEORT_DIR = Path.home() / ".dexterlab" / "geort"
+
+
 def get_package_root():
-    current_dir = Path(os.path.dirname(os.path.realpath(__file__)))
-    return (current_dir / ".." / "..").resolve()
+    return Path(os.path.dirname(os.path.realpath(__file__))).parent.resolve()
+
 
 def to_package_root(path):
-    current_dir = Path(os.path.dirname(os.path.realpath(__file__)))
-    return (current_dir / ".." / "..").resolve() / path
+    """Resolve a path relative to the geort package directory."""
+    return get_package_root() / path
+
 
 def get_data_root():
-    current_dir = Path(os.path.dirname(os.path.realpath(__file__)))
-    return (current_dir / ".." / ".." / "data").resolve()
+    data_dir = _DEXTERLAB_GEORT_DIR / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
 
 def get_checkpoint_root():
-    current_dir = Path(os.path.dirname(os.path.realpath(__file__)))
-    return (current_dir / ".." / ".." / "checkpoint").resolve()
+    checkpoint_dir = _DEXTERLAB_GEORT_DIR / "checkpoint"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    return checkpoint_dir
+
 
 def get_human_data_output_path(human_data):
-    current_dir = Path(os.path.dirname(os.path.realpath(__file__)))
-    return (current_dir / ".." / ".." / "data" / human_data).resolve()
+    return get_data_root() / human_data
+
 
 def get_human_data(name):
-    data_root = Path(get_data_root())
-    all_data_names = os.listdir(data_root)
-    for data_name in all_data_names:
+    data_root = get_data_root()
+    for data_name in os.listdir(data_root):
         if name in data_name:
             return data_root / data_name
 
@@ -40,4 +45,3 @@ def get_human_data(name):
 if __name__ == '__main__':
     print(get_package_root())
     print(get_human_data_output_path("human"))
-

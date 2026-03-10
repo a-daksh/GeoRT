@@ -10,6 +10,13 @@ setup(
     name='geort',
     version='0.1',
     packages=find_packages(),
+    package_data={
+        'geort': [
+            'assets/**/*',
+            'config/*.json',
+        ],
+    },
+    include_package_data=True,
     install_requires=[
         # your dependencies here
     ],
