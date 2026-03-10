@@ -5,59 +5,33 @@
 # LICENSE file in the root directory of this source tree.
 
 import torch
-import os 
-from pathlib import Path
 from geort.formatter import HandFormatter
 from geort.model import IKModel
-from geort.utils.path import to_package_root, get_checkpoint_root
+from geort.utils.path import get_user_dir
 from geort.utils.config_utils import load_json, parse_config_keypoint_info, parse_config_joint_limit
 
 
 class GeoRTRetargetingModel:
-    '''
-        Used by external programs.
-    '''
     def __init__(self, model_path, config_path):
         config = load_json(config_path)
         keypoint_info = parse_config_keypoint_info(config)
         joint_lower_limit, joint_upper_limit = parse_config_joint_limit(config)
-        print(keypoint_info["joint"])
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.human_ids = keypoint_info["human_id"]
-        self.model = IKModel(keypoint_joints=keypoint_info["joint"]).cuda()
-        self.model.load_state_dict(torch.load(model_path))
+        self.model = IKModel(keypoint_joints=keypoint_info["joint"]).to(self.device)
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         self.model.eval()
-        self.qpos_normalizer = HandFormatter(joint_lower_limit, joint_upper_limit) # GeoRT will do normalization.
+        self.qpos_normalizer = HandFormatter(joint_lower_limit, joint_upper_limit)
 
     def forward(self, keypoints):
-        # keypoints: [N, 3]
-        keypoints = keypoints[self.human_ids] # extract.
-        joint_normalized = self.model.forward(torch.from_numpy(keypoints).unsqueeze(0).reshape(1, -1, 3).float().cuda())
-        joint_raw = self.qpos_normalizer.unnormalize(joint_normalized.detach().cpu().numpy())
-        return joint_raw[0]
+        keypoints = keypoints[self.human_ids]
+        t = torch.from_numpy(keypoints).unsqueeze(0).reshape(1, -1, 3).float().to(self.device)
+        joint_normalized = self.model.forward(t)
+        return self.qpos_normalizer.unnormalize(joint_normalized.detach().cpu().numpy())[0]
 
 
-def load_model(tag='', epoch=0):
-    '''
-        Loading API.
-    '''
-    checkpoint_root = get_checkpoint_root()
-    all_checkpoints = os.listdir(checkpoint_root)
-    
-    checkpoint_name = ''
-    for checkpoint in all_checkpoints:
-        if tag in checkpoint:
-            checkpoint_name = checkpoint
-            break 
-
-    checkpoint_root = Path(checkpoint_root) / checkpoint_name
-    if epoch > 0:
-        model_path = checkpoint_root / f"epoch_{epoch}.pth"
-    else:
-        model_path = checkpoint_root / f"last.pth"
-    
-    config_path = checkpoint_root / "config.json"
+def load_model(user: str, hand: str, epoch: int = 0) -> GeoRTRetargetingModel:
+    checkpoint_dir = get_user_dir(user) / f"{hand}_checkpoint"
+    model_path = checkpoint_dir / (f"epoch_{epoch}.pth" if epoch > 0 else "last.pth")
+    config_path = checkpoint_dir / "config.json"
     return GeoRTRetargetingModel(model_path=model_path, config_path=config_path)
-
-if __name__ == '__main__':
-    # load the model in one line.
-    load_model(tag="allegro_last")

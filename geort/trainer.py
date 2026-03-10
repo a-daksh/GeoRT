@@ -12,7 +12,7 @@ import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
 from geort.utils.hand_utils import get_entity_by_name, get_active_joints, get_active_joint_indices
-from geort.utils.path import get_human_data 
+from geort.utils.path import get_robot_data_root, get_user_dir
 from geort.utils.config_utils import get_config, save_json
 from geort.model import FKModel, IKModel 
 from geort.env.hand import HandKinematicModel
@@ -82,10 +82,10 @@ class GeoRTTrainer:
         '''
         data_name = self.config["name"]
         
-        out = f"data/{data_name}"
+        out = get_robot_data_root() / data_name
         if postfix:
-            out += '.npz'
-        return out 
+            out = out.with_suffix('.npz')
+        return out
 
     def get_keypoint_info(self):
         keypoint_links = []
@@ -144,16 +144,13 @@ class GeoRTTrainer:
         dataset = {"qpos": all_data_qpos, "keypoint": all_data_keypoint}
 
         if save:
-            # save data to disk for future use.
-            os.makedirs("data", exist_ok=True)
             np.savez(self.get_robot_kinematics_dataset_path(), **dataset)
 
         return dataset
 
     def get_fk_checkpoint_path(self):
         name = self.config["name"]
-        os.makedirs("checkpoint", exist_ok=True)
-        return f"checkpoint/fk_model_{name}.pth"
+        return get_robot_data_root() / f"fk_model_{name}.pth"
     
     def get_robot_neural_fk_model(self, force_train=False):
         '''
@@ -212,31 +209,23 @@ class GeoRTTrainer:
 
         fk_model = self.get_robot_neural_fk_model()
         ik_model = IKModel(keypoint_joints=self.get_keypoint_info()["joint"]).cuda()
-        os.makedirs("./checkpoint", exist_ok=True)
 
         ik_optim = optim.AdamW(ik_model.parameters(), lr=1e-4)
 
         # Workspace.
-        exp_tag = kwargs.get("tag", "")
+        user = kwargs.get("user", "default")
+        hand = kwargs.get("hand", "right")
         n_epoch = kwargs.get("epoch", 200)
-        hand_model_name = self.config["name"]
 
         w_chamfer = kwargs.get("w_chamfer", 80.0)
         w_curvature = kwargs.get("w_curvature", 0.1)
         w_collision = kwargs.get("w_collision", 0.0)
         w_pinch = kwargs.get("w_pinch", 1.0)
 
+        checkpoint_dir = get_user_dir(user) / f"{hand}_checkpoint"
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-
-        save_dir = f"./checkpoint/{hand_model_name}_{generate_current_timestring()}"
-        if exp_tag != '':
-            save_dir += f'_{exp_tag}'
-        last_save_dir = f"./checkpoint/{hand_model_name}_last"
-
-        os.makedirs(save_dir, exist_ok=True)
-        os.makedirs(last_save_dir, exist_ok=True)
-
-        # Save the config including robot joint info to the checkpoint directory.
+        # Save config with robot joint limits.
         joint_lower_limit, joint_upper_limit = self.hand.get_joint_limit()
 
         export_config = self.config.copy()
@@ -244,9 +233,7 @@ class GeoRTTrainer:
             "lower": get_float_list_from_np(joint_lower_limit),
             "upper": get_float_list_from_np(joint_upper_limit)
         }
-
-        save_json(export_config, Path(save_dir) / "config.json")
-        save_json(export_config, Path(last_save_dir) / "config.json")
+        save_json(export_config, checkpoint_dir / "config.json")
 
         # Dataset.
         robot_keypoint_names = self.get_keypoint_info()['link']
@@ -350,12 +337,8 @@ class GeoRTTrainer:
 
 
             # Saving the checkpoint.
-            torch.save(ik_model.state_dict(), Path(save_dir) / f"epoch_{epoch}.pth")
-            torch.save(ik_model.state_dict(), Path(save_dir) / f"last.pth")
-
-            # This is just for dev phase convenience and can be removed.
-            torch.save(ik_model.state_dict(), Path(last_save_dir) / f"epoch_{epoch}.pth")
-            torch.save(ik_model.state_dict(), Path(last_save_dir) / f"last.pth")
+            torch.save(ik_model.state_dict(), checkpoint_dir / f"epoch_{epoch}.pth")
+            torch.save(ik_model.state_dict(), checkpoint_dir / "last.pth")
 
         return 
 

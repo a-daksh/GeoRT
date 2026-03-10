@@ -155,8 +155,9 @@ class HandKinematicModel:
         '''
             Build a kinematic model from user config.
         '''
+        from geort.utils.path import to_package_root
         render = kwargs.get("render", False)
-        urdf_path = config["urdf_path"]
+        urdf_path = str(to_package_root(config["urdf_path"]))
         n_hand_dof = len(config["joint_order"])
         base_link = config["base_link"]
         joint_order = config["joint_order"]
