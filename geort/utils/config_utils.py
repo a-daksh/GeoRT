@@ -37,7 +37,7 @@ def load_json(filename):
 
 
 def get_config(config_name):
-    config_root = Path(get_package_root())  / "geort" / "config"
+    config_root = Path(get_package_root()) / "config"
     all_configs = os.listdir(config_root)
     
     for config in all_configs:
