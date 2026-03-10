@@ -158,23 +158,25 @@ class GeoRTTrainer:
             If the fk model does not exist, this function will train one first.
         '''
 
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         # Normalizer.
         joint_lower_limit, joint_upper_limit = self.hand.get_joint_limit()
         qpos_normalizer = HandFormatter(joint_lower_limit, joint_upper_limit)
-        
+
         # Model.
         print(self.get_keypoint_info()["joint"])
-        fk_model = FKModel(keypoint_joints=self.get_keypoint_info()["joint"]).cuda()
-        
+        fk_model = FKModel(keypoint_joints=self.get_keypoint_info()["joint"]).to(device)
+
         # If the model exists, load it.
         fk_checkpoint_path = self.get_fk_checkpoint_path()
         if os.path.exists(fk_checkpoint_path) and not force_train:
-            fk_model.load_state_dict(torch.load(fk_checkpoint_path))
+            fk_model.load_state_dict(torch.load(fk_checkpoint_path, map_location=device))
 
         else:
             # If the model does not exist, train it.
             print("Train Neural Forward Kinematics (FK) from Scratch")
-        
+
             fk_dataset = self.get_robot_kinematics_dataset()
             fk_dataloader = DataLoader(fk_dataset, batch_size=256, shuffle=True)
             fk_optim = optim.Adam(fk_model.parameters(), lr=5e-4)
@@ -183,8 +185,8 @@ class GeoRTTrainer:
             for epoch in range(200):
                 all_fk_error = 0
                 for batch_idx, batch in enumerate(fk_dataloader):
-                    keypoint = batch["keypoint"].cuda().float()
-                    qpos = batch["qpos"].cuda().float() 
+                    keypoint = batch["keypoint"].to(device).float()
+                    qpos = batch["qpos"].to(device).float() 
                     qpos = qpos_normalizer.normalize_torch(qpos)
                     predicted_keypoint = fk_model(qpos)
                     fk_optim.zero_grad()
@@ -207,8 +209,10 @@ class GeoRTTrainer:
             This is the main trainer.
         '''
 
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         fk_model = self.get_robot_neural_fk_model()
-        ik_model = IKModel(keypoint_joints=self.get_keypoint_info()["joint"]).cuda()
+        ik_model = IKModel(keypoint_joints=self.get_keypoint_info()["joint"]).to(device)
 
         ik_optim = optim.AdamW(ik_model.parameters(), lr=1e-4)
 
@@ -256,7 +260,7 @@ class GeoRTTrainer:
             for batch_idx, batch in enumerate(point_dataloader):
                 direction_loss = 0
 
-                point = batch.cuda() # [B, N, 3]
+                point = batch.to(device) # [B, N, 3]
                 joint = ik_model(point) # [B, DOF]
                 embedded_point = fk_model(joint) # [B, N, 3]
 
@@ -285,7 +289,7 @@ class GeoRTTrainer:
                 
                 # [Chamfer loss]
                 selected_idx = np.random.randint(0, robot_points.shape[1], 2048) 
-                target = torch.from_numpy(robot_points[:, selected_idx, :]).permute(1, 0, 2).float().cuda()
+                target = torch.from_numpy(robot_points[:, selected_idx, :]).permute(1, 0, 2).float().to(device)
                 
                 chamfer_loss = 0
                 for i in range(n_keypoints):
@@ -293,7 +297,7 @@ class GeoRTTrainer:
 
                 # [Direction Loss]
                 direction = F.normalize(torch.randn_like(point), dim=-1, p=2)
-                scale = 0.001 + torch.rand(point.size(0)).cuda().unsqueeze(-1).unsqueeze(-1) * 0.01
+                scale = 0.001 + torch.rand(point.size(0), device=device).unsqueeze(-1).unsqueeze(-1) * 0.01
                 point_delta = point + direction * scale 
 
                 joint_delta = ik_model(point_delta)
@@ -313,7 +317,7 @@ class GeoRTTrainer:
                 #     collision_loss = criterion(safe_logits, real_labels)
                 
                 # collision Loss integration pending.
-                collision_loss = torch.tensor([0.0]).cuda()
+                collision_loss = torch.tensor([0.0], device=device)
 
                 loss = direction_loss + \
                        chamfer_loss * w_chamfer + \
