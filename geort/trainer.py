@@ -213,6 +213,8 @@ class GeoRTTrainer:
 
         fk_model = self.get_robot_neural_fk_model()
         ik_model = IKModel(keypoint_joints=self.get_keypoint_info()["joint"]).to(device)
+        fk_model = torch.compile(fk_model)
+        ik_model = torch.compile(ik_model)
 
         ik_optim = optim.AdamW(ik_model.parameters(), lr=1e-4)
 
@@ -244,6 +246,7 @@ class GeoRTTrainer:
         n_keypoints = len(robot_keypoint_names)
 
         robot_points = self.get_robot_pointcloud(robot_keypoint_names)
+        robot_points_gpu = torch.from_numpy(robot_points).float().to(device)
 
         human_finger_idxes = self.get_keypoint_info()["human_id"]
         for robot_keypoint_name, human_id in zip(robot_keypoint_names, human_finger_idxes):
@@ -252,8 +255,8 @@ class GeoRTTrainer:
         human_points = np.load(human_data_path)
         human_points = np.array([human_points[:, idx, :3] for idx in human_finger_idxes]) # [N_finger, N, 3]
 
-        point_dataset_human = MultiPointDataset.from_points(human_points, n=20000)
-        point_dataloader = DataLoader(point_dataset_human, batch_size=2048, shuffle=True)
+        point_dataset_human = MultiPointDataset.from_points(human_points, n=200000)
+        point_dataloader = DataLoader(point_dataset_human, batch_size=2048, shuffle=True, num_workers=4, pin_memory=True)
 
         # Training / Optimization
         for epoch in range(n_epoch):
@@ -288,8 +291,8 @@ class GeoRTTrainer:
                 curvature_loss = ((embedded_point_p + embedded_point_n - 2 * embedded_point) ** 2).mean()
                 
                 # [Chamfer loss]
-                selected_idx = np.random.randint(0, robot_points.shape[1], 2048) 
-                target = torch.from_numpy(robot_points[:, selected_idx, :]).permute(1, 0, 2).float().to(device)
+                selected_idx = torch.randint(0, robot_points_gpu.shape[1], (2048,), device=device)
+                target = robot_points_gpu[:, selected_idx, :].permute(1, 0, 2)
                 
                 chamfer_loss = 0
                 for i in range(n_keypoints):
@@ -341,8 +344,9 @@ class GeoRTTrainer:
 
 
             # Saving the checkpoint.
-            torch.save(ik_model.state_dict(), checkpoint_dir / f"epoch_{epoch}.pth")
-            torch.save(ik_model.state_dict(), checkpoint_dir / "last.pth")
+            raw_state = ik_model._orig_mod.state_dict()
+            torch.save(raw_state, checkpoint_dir / f"epoch_{epoch}.pth")
+            torch.save(raw_state, checkpoint_dir / "last.pth")
 
         return 
 
