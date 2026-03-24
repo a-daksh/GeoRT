@@ -227,6 +227,7 @@ class GeoRTTrainer:
         w_curvature = kwargs.get("w_curvature", 0.1)
         w_collision = kwargs.get("w_collision", 0.0)
         w_pinch = kwargs.get("w_pinch", 1.0)
+        w_reg   = kwargs.get("w_reg", 0.0)
 
         checkpoint_dir = get_user_dir(user) / f"{hand}_checkpoint"
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -248,6 +249,11 @@ class GeoRTTrainer:
         robot_points = self.get_robot_pointcloud(robot_keypoint_names)
         robot_points_gpu = torch.from_numpy(robot_points).float().to(device)
 
+        # Normalized flat hand pose
+        q_lower = torch.tensor(joint_lower_limit, dtype=torch.float32, device=device)
+        q_upper = torch.tensor(joint_upper_limit, dtype=torch.float32, device=device)
+        q_flat_norm = 2*(0 - q_lower)/(q_upper - q_lower)-1
+
         human_finger_idxes = self.get_keypoint_info()["human_id"]
         for robot_keypoint_name, human_id in zip(robot_keypoint_names, human_finger_idxes):
             print(f"Robot Keypoint {robot_keypoint_name}: Human Id: {human_id}")
@@ -265,6 +271,7 @@ class GeoRTTrainer:
 
                 point = batch.to(device) # [B, N, 3]
                 joint = ik_model(point) # [B, DOF]
+                reg_loss = ((joint - q_flat_norm)**2).mean()
                 embedded_point = fk_model(joint) # [B, N, 3]
 
                 # [Pinch Loss] 
@@ -326,7 +333,8 @@ class GeoRTTrainer:
                        chamfer_loss * w_chamfer + \
                        curvature_loss * w_curvature + \
                        collision_loss * w_collision + \
-                       pinch_loss * w_pinch
+                       pinch_loss * w_pinch + \
+                       reg_loss * w_reg
 
                 ik_optim.zero_grad()
                 loss.backward()
@@ -335,11 +343,13 @@ class GeoRTTrainer:
                 if batch_idx % 50 == 0:
                     print(
                         f"Epoch {epoch} | Losses"
-                        f" - Direction: {format_loss(direction_loss.item())}"
-                        f" - Chamfer: {format_loss(chamfer_loss.item())}"
-                        f" - Curvature: {format_loss(curvature_loss.item())}"
-                        f" - Collision: {format_loss(collision_loss.item())}"
-                        f" - Pinch: {format_loss(pinch_loss.item())}"
+                        f"- Overall: {format_loss(loss.item())}"
+                        f", Direction: {format_loss(direction_loss.item())}"
+                        f", Chamfer: {format_loss(chamfer_loss.item())}"
+                        f", Curvature: {format_loss(curvature_loss.item())}"
+                        f", Collision: {format_loss(collision_loss.item())}"
+                        f", Pinch: {format_loss(pinch_loss.item())}"
+                        f", Reg: {format_loss(reg_loss.item())}"
                     )
 
 
