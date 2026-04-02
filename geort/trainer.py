@@ -7,6 +7,7 @@
 import numpy as np
 import sapien.core as sapien
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 import torch
 import torch.optim as optim
 import torch.nn as nn
@@ -232,6 +233,9 @@ class GeoRTTrainer:
         checkpoint_dir = get_user_dir(user) / f"{hand}_checkpoint"
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+        tb_log_dir = checkpoint_dir / "logs"
+        writer = SummaryWriter(log_dir=str(tb_log_dir))
+
         # Save config with robot joint limits.
         joint_lower_limit, joint_upper_limit = self.hand.get_joint_limit()
 
@@ -351,6 +355,15 @@ class GeoRTTrainer:
                         f", Pinch: {format_loss(pinch_loss.item())}"
                         f", Reg: {format_loss(reg_loss.item())}"
                     )
+                    
+                    global_step = epoch * len(point_dataloader) + batch_idx
+                    writer.add_scalar("Loss/Overall", loss.item(), global_step)
+                    writer.add_scalar("Loss/Direction", direction_loss.item(), global_step)
+                    writer.add_scalar("Loss/Chamfer", chamfer_loss.item(), global_step)
+                    writer.add_scalar("Loss/Curvature", curvature_loss.item(), global_step)
+                    writer.add_scalar("Loss/Collision", collision_loss.item(), global_step)
+                    writer.add_scalar("Loss/Pinch", pinch_loss.item(), global_step)
+                    writer.add_scalar("Loss/Reg", reg_loss.item(), global_step)
 
 
             # Saving the checkpoint.
@@ -358,6 +371,7 @@ class GeoRTTrainer:
             torch.save(raw_state, checkpoint_dir / f"epoch_{epoch}.pth")
             torch.save(raw_state, checkpoint_dir / "last.pth")
 
+        writer.close()
         return 
 
 
